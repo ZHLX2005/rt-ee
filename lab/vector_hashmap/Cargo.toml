@@ -1,0 +1,8 @@
+[package]
+name = "vector_hashmap"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vector_hashmap"
+path = "src/main.rs"

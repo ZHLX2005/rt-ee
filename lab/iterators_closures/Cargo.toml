@@ -1,0 +1,8 @@
+[package]
+name = "iterators_closures"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "iterators_closures"
+path = "src/main.rs"

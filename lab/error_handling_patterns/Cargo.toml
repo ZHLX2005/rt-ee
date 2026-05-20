@@ -1,0 +1,12 @@
+[package]
+name = "error_handling_patterns"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "error_handling_patterns"
+path = "src/main.rs"
+
+[dependencies]
+thiserror = "1.0"
+anyhow = "1.0"

@@ -5,3 +5,7 @@ edition = "2021"
 description = "Rust learning examples"
 
 [dependencies]
+
+[workspace]
+members = ["lab/*"]
+resolver = "2"

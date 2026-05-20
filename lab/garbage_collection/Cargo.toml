@@ -1,0 +1,8 @@
+[package]
+name = "garbage_collection"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "garbage_collection"
+path = "src/main.rs"

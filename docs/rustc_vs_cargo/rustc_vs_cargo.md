@@ -229,6 +229,10 @@ cargo 可以独立于 rustc 演进（只要保持最低支持的 rustc 版本）
 
 ---
 
+## 延伸阅读
+
+- [Rust 编译器管线深度解析](compiler_pipeline/compiler_pipeline.md)
+
 ## 常见用法速查
 
 | 命令 | 说明 | rustc 等价 |

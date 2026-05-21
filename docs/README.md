@@ -36,3 +36,4 @@
   - [Rust 过程宏 vs Java 注解处理器](procedural_macros/proc_macro_vs_annotation.md)
 - [泛型与反射](generics_and_reflection/generics_and_reflection.md)
   - [父类泛型信息传递](generics_and_reflection/generic_type_passing.md)
+- [链路追踪生态](distributed_tracing/distributed_tracing.md)

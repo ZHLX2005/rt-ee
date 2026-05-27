@@ -1,1 +1,0 @@
-D:\code\a_rust\proj\rt-ee\lab\dependency_resolution\app\target\debug\dependency_resolution.exe: D:\code\a_rust\proj\rt-ee\lab\dependency_resolution\app\src\main.rs D:\code\a_rust\proj\rt-ee\lab\dependency_resolution\lib_v1\src\lib.rs D:\code\a_rust\proj\rt-ee\lab\dependency_resolution\lib_v2\src\lib.rs

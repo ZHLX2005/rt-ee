@@ -190,6 +190,150 @@ fn main() {
 
 ---
 
+## 进阶：Move 的底层机制
+
+### Move 之后，内存到底发生了什么？
+
+这是从 Java/Go 转来的程序员最困惑的问题之一。
+
+```rust
+let s1 = String::from("hello"); // s1 在栈上，包含[指针, 长度, 容量]
+let s2 = s1;                    // move 发生
+```
+
+**在汇编层面**，`let s2 = s1` 只做了一件事：**把 s1 在栈上的 24 个字节按位拷贝到 s2 的位置**。没有魔法，没有运行时检查，就是一次 `mov` 指令。
+
+那"s1 无效"是什么意思？**这是编译器层面的状态追踪，不是运行时的物理清零**。
+
+```
+栈帧布局（64位）：
+
+move 前：
+  s1: [ptr=0x7f...1000, len=5, cap=5]  ← 指向堆上的 "hello"
+
+move 后（物理内存）：
+  s1: [ptr=0x7f...1000, len=5, cap=5]  ← 原值还在！只是编译器禁止你读
+  s2: [ptr=0x7f...1000, len=5, cap=5]  ← 按位拷贝过来的副本
+
+编译器视角：
+  s1: [MOVED — 未初始化]              ← 状态标记
+  s2: [Initialized — 拥有所有权]       ← 唯一合法的 owner
+```
+
+**为什么不会"堆栈混乱"？**
+
+1. **物理层面没有混乱**：s1 的内存只是原样保留（为了性能，不会清零），栈帧结构完全正常
+2. **逻辑层面被严格管控**：编译器在 MIR 上追踪每个变量的初始化状态，`s1` 被标记为 `Moved`
+3. **Drop 只执行一次**：编译器保证只有 `s2` 的析构函数会被调用，`s1` 的析构被跳过
+
+对比 Java：
+```java
+String s1 = new String("hello");
+String s2 = s1;  // s1 和 s2 都引用同一个对象，对象头引用计数+1（或 GC 追踪）
+// s1 仍然完全可用
+```
+Java 需要运行时机制（GC 或引用计数）来管理共享所有权。Rust 在编译期就消除了"共享"的可能性。
+
+### 编译器如何在编译期检测 use-after-move？
+
+Rust 编译器在 **MIR（Mid-level IR）** 阶段执行**Move Path Analysis**（移动路径分析）。
+
+```rust
+fn main() {
+    let s1 = String::from("hello");  // s1: Initialized
+    let s2 = s1;                     // s1: Moved → s2: Initialized
+    println!("{}", s1);              // 编译错误！s1 状态为 Moved
+}
+```
+
+编译器为每个变量路径维护一个状态机：
+
+| 状态 | 含义 | 对 use 的反应 |
+|------|------|-------------|
+| `Uninitialized` | 变量声明但尚未赋值 | 禁止使用 |
+| `Initialized` | 变量持有有效值 | 允许使用 |
+| `Moved` | 值已被转移给其他变量 | **禁止使用，报错** |
+| `PartiallyMoved` | 复合类型的部分字段被移动 | 整体和部分都受限制 |
+
+这个分析在**控制流图（CFG）**上进行：
+
+```
+MIR 控制流图（简化）：
+
+bb0: {
+    _1 = String::from("hello");     // _1 状态: Initialized
+    _2 = move _1;                    // _1 状态: Moved, _2 状态: Initialized
+    _3 = _1;                         // 错误！_1 在 bb0 入口时是 Moved
+    return;
+}
+```
+
+编译器遍历每个基本块（basic block），追踪每个路径的状态。当发现对已 `Moved` 的路径进行读取时，立即报错：
+
+```
+error[E0382]: borrow of moved value: `s1`
+  --> src/main.rs:4:14
+   |
+ 2 |     let s1 = String::from("hello");
+   |         -- move occurs because `s1` has type `String`,
+   |            which does not implement the `Copy` trait
+ 3 |     let s2 = s1;
+   |              -- value moved here
+ 4 |     println!("{}", s1);
+   |                    ^^ value borrowed here after move
+```
+
+### 为什么能做到编译期检测？
+
+**关键洞察**：Rust 的 move 不是运行时的操作，而是**编译期的状态转换**。
+
+```
+Java 的引用语义：
+  运行时：两个引用指向同一对象 → 需要 GC/引用计数决定何时释放
+  问题：编译器无法知道一个引用是否仍然有效（因为可能有第三个引用）
+
+Rust 的所有权语义：
+  编译期：值从 A 转移到 B，A 永久失效 → 编译器精确知道唯一 owner
+  结果：不需要运行时追踪，状态分析在编译期完成
+```
+
+Rust 能做到这一点的前提是**所有权规则的严格性**：
+- 每个值只能有一个 owner
+- 没有隐式共享（必须通过 `Rc`/`Arc` 显式选择）
+- 没有隐式拷贝（必须通过 `.clone()` 显式选择）
+
+这种严格性使得编译器可以在 MIR 上静态分析所有可能的执行路径，而不需要运行时信息。
+
+### Partial Move：结构体字段的移动
+
+Move 分析不仅作用于整个变量，还精确到字段级别：
+
+```rust
+struct Person {
+    name: String,
+    age: u32,
+}
+
+fn main() {
+    let p = Person {
+        name: String::from("Alice"),
+        age: 30,
+    };
+
+    let name = p.name;  // p.name 被 move
+    // println!("{:?}", p);      // 编译错误！p 部分移动
+    // println!("{}", p.name);   // 编译错误！p.name 已移动
+    println!("{}", p.age);       // OK，p.age 没有被移动
+}
+```
+
+编译器对 `p` 的每个字段分别追踪状态：`p.name` 是 `Moved`，`p.age` 是 `Initialized`。这种细粒度的追踪确保了：
+- 不会双重释放 `p.name`
+- 不会读取未初始化的 `p.name`
+- 但仍然允许安全地使用 `p.age`
+
+---
+
 ## 设计哲学
 
 ### 所有权系统的代价与收益

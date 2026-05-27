@@ -6,6 +6,7 @@
 
 - [Hello World](hello/hello.md)
 - [所有权 (Ownership)](ownership/ownership.md)
+  - [所有权与 OOP 设计模式的兼容性](ownership_and_oop/ownership_and_oop.md)
 - [借用 (Borrowing)](borrowing/borrowing.md)
 - [结构体 (Structs)](structs/structs.md)
 - [枚举 (Enums)](enums/enums.md)
@@ -21,6 +22,8 @@
 - [静态与动态语言的体现](static_dynamic/static_dynamic.md)
 - [泛型进阶：嵌套泛型与性能优化](generics_advanced/generics_advanced.md)
 - [模块 (Modules)](modules/modules.md)
+- [Rust 运行时模型：类加载与类型系统](runtime_model/runtime_model.md)
+- [依赖版本冲突：Rust vs Go 的编译原理差异](dependency_resolution/dependency_resolution.md)
 - [rustc 与 cargo 的区别](rustc_vs_cargo/rustc_vs_cargo.md)
   - [Rust 编译器管线深度解析](compiler_pipeline/compiler_pipeline.md)
   - [MIR 与借用检查器算法深度解析](compiler_pipeline/mir_borrow_check.md)

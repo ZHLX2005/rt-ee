@@ -1,0 +1,8 @@
+[package]
+name = "ownership_and_oop"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ownership_and_oop"
+path = "src/main.rs"

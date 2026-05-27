@@ -1,0 +1,18 @@
+[package]
+name = "dependency_resolution"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "dependency_resolution"
+path = "src/main.rs"
+
+# 关键：同一个 crate 的不同 major 版本可以通过 rename 共存！
+# Cargo 在编译时将它们视为完全不同的编译单元，符号也被版本化隔离。
+[dependencies]
+mylib_v1 = { package = "mylib", path = "../lib_v1" }
+mylib_v2 = { package = "mylib", path = "../lib_v2" }
+
+# 声明这是一个独立的 workspace，不属于上级 workspace
+[workspace]
+

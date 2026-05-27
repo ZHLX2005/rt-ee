@@ -20,6 +20,7 @@
 - [迭代器与闭包](iterators_closures/iterators_closures.md)
 - [Rust 基础语法：let、mut、？](rust_fundamentals/rust_fundamentals.md)
 - [静态与动态语言的体现](static_dynamic/static_dynamic.md)
+- [Rust 指针类型全景](rust_pointers/rust_pointers.md)
 - [泛型进阶：嵌套泛型与性能优化](generics_advanced/generics_advanced.md)
 - [模块 (Modules)](modules/modules.md)
 - [Rust 运行时模型：类加载与类型系统](runtime_model/runtime_model.md)

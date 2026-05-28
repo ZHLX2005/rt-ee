@@ -333,6 +333,149 @@ cargo run -p rust_pointers
 
 ---
 
+## 内存开销控制策略
+
+理解指针的内存开销后，关键是**在正确场景选择正确的指针，避免过度支付代价**。
+
+### 核心原则：按需选择，不提前泛化
+
+```
+默认选择（零开销）：
+  栈分配 → &T（借用）
+  
+需要堆分配时：
+  单一所有者 → Box<T>
+  
+需要共享时：
+  单线程只读 → Rc<T>
+  单线程可变 → Rc<RefCell<T>>
+  多线程只读 → Arc<T>
+  多线程可变 → Arc<Mutex<T>>
+  
+需要运行时多态：
+  同质集合 → 泛型 + 静态分发（零开销）
+  异质集合 → dyn Trait（胖指针开销）
+```
+
+### 策略 1：优先使用借用（&T）而非拥有（Box<T> / Rc<T>）
+
+```rust
+// 差：不必要的堆分配和引用计数
+fn process(items: Rc<Vec<i32>>) { ... }
+
+// 好：只读借用，零额外开销
+fn process(items: &[i32]) { ... }
+```
+
+**为什么**：借用不拥有数据，不管理生命周期，不分配控制块。`&[i32]` 只有 16 bytes（胖指针：数据 ptr + 长度），而 `Rc<Vec<i32>>` 是 8 bytes 指针 + 堆上控制块（约 24 bytes）+ Vec 本身（24 bytes）。
+
+### 策略 2：避免智能指针嵌套
+
+```rust
+// 差：双重引用计数，毫无意义
+let x: Rc<Arc<String>> = ...;
+
+// 差：Box 包裹已经在堆上的类型
+let x: Box<Vec<i32>> = Box::new(vec![1, 2, 3]); // Vec 已经在堆上
+
+// 好：直接使用最简形式
+let x: Vec<i32> = vec![1, 2, 3];
+```
+
+**嵌套开销分析**：
+
+| 类型 | 栈大小 | 堆控制块 | 总开销 |
+|------|--------|---------|--------|
+| `String` | 24 bytes | 无 | 最小 |
+| `Box<String>` | 8 bytes | 无（Box 和 String.data 共享堆）| 正常 |
+| `Rc<String>` | 8 bytes | 16 bytes（强/弱计数）| +16 bytes |
+| `Arc<String>` | 8 bytes | 16 bytes（原子计数）| +16 bytes |
+| `Rc<RefCell<String>>` | 8 bytes | 16 + 16 bytes | +32 bytes |
+| `Arc<Mutex<String>>` | 8 bytes | 16 + 40+ bytes | +56+ bytes |
+
+### 策略 3：单线程场景不用线程安全类型
+
+```rust
+// 差：为单线程代码支付原子操作开销
+let counter = Arc::new(Mutex::new(0));
+
+// 好：单线程用 Rc + RefCell
+let counter = Rc::new(RefCell::new(0));
+
+// 更好：如果能重构为线性流程，不用内部可变性
+let mut counter = 0;
+counter += 1;
+```
+
+**性能差异**：`Rc::clone` 是普通内存递增，`Arc::clone` 是原子递增（CPU 缓存同步开销）。`RefCell::borrow_mut` 是本地计数检查，`Mutex::lock` 是系统调用级的锁。
+
+### 策略 4：优先静态分发，必要时再用 dyn Trait
+
+```rust
+// 差：为同质集合支付动态分发开销
+trait Processor { fn process(&self); }
+
+fn run_all(items: Vec<Box<dyn Processor>>) {
+    for item in items { item.process(); } // 每次都有 vtable 查找
+}
+
+// 好：同质集合用泛型，零运行时开销
+fn run_all<T: Processor>(items: Vec<T>) {
+    for item in items { item.process(); } // 直接内联调用
+}
+```
+
+**dyn Trait 的真实开销**：
+- 指针：8 bytes → 16 bytes（胖指针）
+- 调用：直接 call → 间接 call（多 2-3 次内存访问）
+- 内联：编译器无法内联 dyn 调用
+
+只有在**异质集合**（同一集合里混存多种类型）时才需要 `dyn Trait`。
+
+### 策略 5：Copy 类型优先用 Cell，避免 RefCell 的引用语义
+
+```rust
+// RefCell：支持非 Copy 类型，有运行时借用检查
+let count = RefCell::new(0usize);
+*count.borrow_mut() += 1; // 引用计数 + 借用检查
+
+// Cell：仅 Copy 类型，直接值替换，无运行时检查
+let count = Cell::new(0usize);
+count.set(count.get() + 1); // 直接内存读写
+```
+
+`Cell<T>` 的开销**等同于普通变量**，`RefCell<T>` 有引用计数和借用规则检查。计数器、标志位等简单状态应始终用 `Cell`。
+
+### 策略 6：栈分配优先于堆分配
+
+```rust
+// 差：固定小数组用 Vec（堆分配）
+let coords: Vec<i32> = vec![1, 2, 3];
+
+// 好：固定大小用数组（栈分配）
+let coords: [i32; 3] = [1, 2, 3];
+
+// 差：小字符串用 String（堆分配）
+let label: String = String::from("ok");
+
+// 好：字面量用 &str（指向静态只读数据段）
+let label: &str = "ok";
+```
+
+### 开销决策速查表
+
+| 场景 | 推荐选择 | 避免 | 理由 |
+|------|---------|------|------|
+| 函数参数只读 | `&T` / `&[T]` | `Rc<T>` / `Box<T>` | 借用最轻量 |
+| 函数参数可变 | `&mut T` | `Rc<RefCell<T>>` | 编译期借用无开销 |
+| 配置/只读共享 | `Arc<T>` | `Rc<T>`（跨线程时）| 线程安全是编译器强制的 |
+| 计数器/标志位 | `Cell<usize>` | `RefCell<usize>` | Cell 无运行时检查 |
+| 回调修改状态 | `RefCell<T>` | `Mutex<T>`（单线程）| 不用为单线程付锁的代价 |
+| 异质集合 | `Vec<Box<dyn Trait>>` | `Vec<Box<T>>` + 枚举包装 | dyn 是正确工具 |
+| 同质集合 | `Vec<T>` + 泛型 | `Vec<Box<dyn Trait>>` | 避免无意义的 vtable |
+
+---
+
 ## 设计哲学总结
 
 ### Rust 没有"指针"，只有"所有权语义"

@@ -87,6 +87,65 @@ fn process() {
 
 ## Rust 的动态特性
 
+### 分发（Dispatch）的概念
+
+**分发（Dispatch）**指的是编译器/运行时**决定调用哪个具体方法实现**的过程。它是面向对象和多态系统的核心机制。
+
+#### 静态分发（Static Dispatch）
+
+编译期就确定调用哪个函数，直接生成函数调用指令：
+
+```rust
+trait Draw { fn draw(&self); }
+struct Circle;
+impl Draw for Circle { fn draw(&self) { println!("circle"); } }
+
+fn render<T: Draw>(item: T) {
+    item.draw(); // 编译时确定：这里一定是 Circle::draw
+}
+
+render(Circle); // 编译器生成 render_circle 专用函数
+```
+
+**特点**：
+- 编译期解析，零运行时开销
+- 通过泛型的**具体化（Monomorphization）**实现：为每个具体类型生成一份专用代码
+- 无法处理异质集合（`Vec` 里混存多种类型）
+
+#### 动态分发（Dynamic Dispatch）
+
+运行时才确定调用哪个函数，通过 vtable 间接查找：
+
+```rust
+fn render(item: &dyn Draw) {
+    item.draw(); // 运行时：从 vtable 查找 draw 的地址再跳转
+}
+
+render(&Circle); // 编译器只生成一份代码，运行时通过 vtable 分派
+```
+
+**特点**：
+- 运行期解析，有间接调用开销（1-2 次额外内存访问）
+- 一份代码处理所有实现该 trait 的类型
+- 支持异质集合：`Vec<Box<dyn Draw>>` 可以混存 Circle、Rectangle 等
+
+#### 对比表
+
+| 维度 | 静态分发 | 动态分发 |
+|------|---------|---------|
+| 解析时机 | 编译期 | 运行期 |
+| 实现机制 | 泛型具体化 | vtable 查找 |
+| 代码体积 | 每种类型一份代码 | 一份通用代码 |
+| 运行时开销 | 零（直接 call） | 间接调用（2-3 次内存访问）|
+| 内联优化 | 可以内联 | 无法内联 |
+| 异质集合 | 不支持 | 支持 |
+
+#### 为什么 Rust 默认偏好静态分发？
+
+Rust 的设计哲学是**显式支付代价**。静态分发是默认（泛型），动态分发需要显式写 `dyn`——这与 Java 完全相反（Java 默认虚调用，final 才能避免）。
+
+---
+
 ### dyn Trait：运行时多态
 
 Rust 通过 `dyn Trait` 提供运行时多态能力：
@@ -195,6 +254,93 @@ let slice: &[i32] = &arr[1..4]; // &[2, 3, 4]
 ```
 
 Slice 引用需要胖指针的原因：编译时不知道 slice 的长度。`[i32]` 是一个**动态大小类型（DST）**，编译器无法在栈上分配固定大小的空间。
+
+#### vtable 的内存空间详解
+
+vtable 是实现动态分发的核心数据结构。理解它的**存储位置、生命周期和大小**对评估动态分发的真实开销至关重要。
+
+**1. vtable 存放在哪里？**
+
+```
+可执行文件布局（编译后）：
+┌─────────────────────────────────────┐
+│ .text 段 — 代码                     │
+│ .rodata/.rdata 段 — 只读数据        │ ◄── vtable 在这里
+│ .data 段 — 可读写全局变量            │
+│ .bss 段 — 未初始化全局变量           │
+│ ...                                 │
+└─────────────────────────────────────┘
+```
+
+vtable 存放在**只读数据段（.rodata / .rdata）**中：
+- **编译期生成**：编译器为每个 `(类型, trait)` 组合生成一个 vtable，直接嵌入可执行文件
+- **运行时只读**：vtable 在程序运行期间永远不会被修改，多个实例共享同一个 vtable
+- **静态分配**：不需要运行时分配内存，不占用堆空间
+
+**2. 一个类型有多少个 vtable？**
+
+每个类型对**每个它实现的 trait** 都有一个独立的 vtable：
+
+```rust
+struct Circle { radius: f64 }
+
+trait Draw { fn draw(&self); }
+trait Area { fn area(&self) -> f64; }
+
+impl Draw for Circle { ... }
+impl Area for Circle { ... }
+
+// Circle 有两个 vtable：
+// - vtable for Draw (Circle, Draw)
+// - vtable for Area (Circle, Area)
+```
+
+**3. vtable 的内存布局**
+
+```
+vtable for Drawable (Circle 实现):
+┌──────────────────────────────┐
+│ [0] type_info 指针            │ ──→ Circle 的类型元数据（用于 downcast）
+│ [1] drop_in_place 函数指针    │ ──→ Circle 的析构函数
+│ [2] size_of::<Circle>()      │ ──→ 类型大小（用于内存分配）
+│ [3] align_of::<Circle>()     │ ──→ 类型对齐要求
+│ [4] draw() 函数指针           │ ──→ Circle::draw 的地址
+│ [5] 其他 trait 方法指针...     │
+└──────────────────────────────┘
+```
+
+**大小计算**：
+```
+vtable 大小 = (trait 方法数量 + 头部字段数) × 指针大小(8 bytes)
+
+例如：Drawable trait 有 1 个方法
+      vtable 大小 = (1 + 4) × 8 = 40 bytes
+
+如果 100 个类型实现 Drawable：
+      总 vtable 开销 = 100 × 40 = 4,000 bytes（约 4 KB）
+```
+
+**4. vtable 的生命周期**
+
+| 阶段 | 行为 |
+|------|------|
+| 编译期 | 编译器生成 vtable，写入目标文件的 .rodata 段 |
+| 链接期 | 链接器合并重复的 vtable，确定最终虚拟地址 |
+| 运行期 | vtable 随程序加载到内存，只读，共享 |
+| 程序结束 | 随进程销毁，无需清理 |
+
+**5. 与 Java 方法表的对比**
+
+| 维度 | Rust vtable | Java 虚方法表 |
+|------|-------------|---------------|
+| 创建时机 | 编译期 | 类加载期 |
+| 存储位置 | 可执行文件 .rodata 段 | JVM 方法区/元空间 |
+| 数量 | 每 (类型, trait) 一个 | 每类一个（包含所有方法）|
+| 运行时修改 | 不可修改 | 不可修改（但类加载是动态的）|
+| 大小确定 | 编译期完全确定 | 类加载时根据继承链计算 |
+| 查找开销 | 固定偏移（O(1)） | 固定偏移（O(1)） |
+
+**关键洞察**：Rust 的 vtable 是纯编译期产物，不依赖运行时环境。这与 Java 的类加载机制形成鲜明对比——Java 的方法表在类加载时动态构建，而 Rust 的 vtable 在编译时就已固化到可执行文件中。
 
 #### 胖指针与 Java 引用的对比
 

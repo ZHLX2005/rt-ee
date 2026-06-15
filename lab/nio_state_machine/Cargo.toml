@@ -1,0 +1,11 @@
+[package]
+name = "nio_state_machine"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nio_state_machine"
+path = "src/main.rs"
+
+[dependencies]
+mio = { version = "1", features = ["os-poll", "net"] }

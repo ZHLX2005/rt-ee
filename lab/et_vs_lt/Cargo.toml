@@ -1,0 +1,11 @@
+[package]
+name = "et_vs_lt"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "et_vs_lt"
+path = "src/main.rs"
+
+[dependencies]
+mio = { version = "1", features = ["os-poll", "net"] }

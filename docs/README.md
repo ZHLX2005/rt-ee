@@ -41,3 +41,7 @@
 - [泛型与反射](generics_and_reflection/generics_and_reflection.md)
   - [父类泛型信息传递](generics_and_reflection/generic_type_passing.md)
 - [链路追踪生态](distributed_tracing/distributed_tracing.md)
+- [API 深度对比：Rust vs Java vs Go 的底层控制力](api_depth/api_depth.md)
+- [Raw Socket I/O：手撕 epoll/IOCP 网络编程](raw_socket_io/raw_socket_io.md)
+  - [NIO 状态机：连接生命周期与 Partial I/O](raw_socket_io/nio_state_machine.md)
+  - [Edge Triggered vs Level Triggered：代码差异](raw_socket_io/edge_vs_level_triggered.md)
